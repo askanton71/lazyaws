@@ -1,4 +1,17 @@
 # LazyAWS
+<div align="center" aria-hidden="true">
+
+<pre>
+██╗░░░░░░█████╗░███████╗██╗░░░██╗      ░█████╗░░██╗░░░░░░░██╗░██████╗
+██║░░░░░██╔══██╗╚════██║╚██╗░██╔╝      ██╔══██╗░██║░░██╗░░██║██╔════╝
+██║░░░░░███████║░░███╔═╝░╚████╔╝░      ███████║░╚██╗████╗██╔╝╚█████╗░
+██║░░░░░██╔══██║██╔══╝░░░░╚██╔╝░░      ██╔══██║░░████╔═████║░░╚═══██╗
+███████╗██║░░██║███████╗░░░██║░░░      ██║░░██║░░╚██╔╝░╚██╔╝░██████╔╝
+╚══════╝╚═╝░░╚═╝╚══════╝░░░╚═╝░░░      ╚═╝░░╚═╝░░░╚═╝░░░╚═╝░░╚═════╝░
+</pre>
+
+<p><b>by <a href="https://www.youtube.com/@Lazy_IT">LazyIT</a></b> • type <code>help</code> to get started</p>
+</div>
 
 Metasploit-style **AWS security auditor**: enumerate, test, and report on S3, EC2, IAM, and Lambda — with a REPL-like console (`runner.py`), JSON artifacts per resource, and a rich Excel report.
 

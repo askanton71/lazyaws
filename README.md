@@ -34,6 +34,12 @@ Metasploit-style **AWS security auditor**: enumerate, test, and report on S3, EC
 ## 🚀 Quickstart
 
 ```bash
+apt update
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+aws --version
+aws configure
 git clone https://github.com/askanton71/lazyaws.git
 cd lazyaws
 

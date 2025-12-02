@@ -34,7 +34,7 @@ Metasploit-style **AWS security auditor**: enumerate, test, and report on S3, EC
 ## 🚀 Quickstart
 
 ```bash
-git clone https://github.com/<your-org>/lazyaws.git
+git clone https://github.com/askanton71/lazyaws.git
 cd lazyaws
 
 # Recommended: Python 3.9+

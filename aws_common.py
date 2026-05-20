@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Callable
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 # ------------------------------ UI constants ------------------------------
@@ -36,6 +37,21 @@ ANSI_RE = re.compile(r"\x1B\[[0-9;]*[mK]")
 
 RAW_DIR = Path("RawData")
 RAW_DIR.mkdir(exist_ok=True)
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except Exception:
+        return default
+
+DEFAULT_CLIENT_CONFIG = Config(
+    connect_timeout=_env_int("LAZYAWS_CONNECT_TIMEOUT", 10),
+    read_timeout=_env_int("LAZYAWS_READ_TIMEOUT", 30),
+    retries={
+        "max_attempts": _env_int("LAZYAWS_MAX_ATTEMPTS", 2),
+        "mode": os.environ.get("LAZYAWS_RETRY_MODE", "standard"),
+    },
+)
 
 # ------------------------------ Helpers ------------------------------
 
@@ -152,7 +168,10 @@ class _TracedClientProxy:
         return wrapper
 
 def get_traced_client(session, service: str, api_trace: list, profile: Optional[str] = None, region: Optional[str] = None):
-    client = session.client(service, region_name=region) if region else session.client(service)
+    client_kwargs = {"config": DEFAULT_CLIENT_CONFIG}
+    if region:
+        client_kwargs["region_name"] = region
+    client = session.client(service, **client_kwargs)
     return _TracedClientProxy(client, service, api_trace, profile, region)
 
 # ------------------------------ ASCII table ------------------------------

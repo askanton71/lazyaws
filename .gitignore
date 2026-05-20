@@ -194,6 +194,12 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# LazyAWS generated audit artifacts
+RawData/*
+!RawData/.gitkeep
+Reports/*
+!Reports/.gitkeep
+
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data

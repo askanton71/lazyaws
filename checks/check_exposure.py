@@ -15,8 +15,8 @@ Enumerates (across regions) resources that are directly reachable from the Inter
 - Redshift clusters with PubliclyAccessible
 - EKS clusters with endpointPublicAccess=True
 - App Runner services with public ingress
-- CloudFront distributions (enabled)  [global → us-east-1]
-- Global Accelerator accelerators (enabled)  [global → us-west-2]
+- CloudFront distributions (enabled)  [global в†’ us-east-1]
+- Global Accelerator accelerators (enabled)  [global в†’ us-west-2]
 - MSK clusters with public bootstrap brokers
 
 Emits BAD finding per internet entrypoint. If none found, emits a single OK row.
@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from botocore.exceptions import ClientError, EndpointConnectionError
+from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -41,6 +41,8 @@ from aws_common import (
     run_check,
     OK, WARN, BAD, NA,
 )
+
+AWS_DISCOVERY_ERRORS = (BotoCoreError, ClientError, EndpointConnectionError)
 
 # ---------------- helpers ----------------
 
@@ -150,7 +152,7 @@ def discover_ec2(sess, api_trace, region, findings):
                                     f"Region={region}", ["ec2:DescribeInstances","ec2:DescribeSecurityGroups"],
                                     "BAD", pr,
                                     "Move instance behind private subnets/Load Balancer; restrict SG ingress; prefer SSM over SSH.")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_elbv2(sess, api_trace, region, findings):
@@ -170,13 +172,13 @@ def discover_elbv2(sess, api_trace, region, findings):
                     for lpage in ls_p.paginate(LoadBalancerArn=lb["LoadBalancerArn"]):
                         ports.extend([l.get("Port") for l in lpage.get("Listeners", []) if l.get("Port")])
                     ports = sorted(set([p for p in ports if p is not None]))
-                except ClientError:
+                except AWS_DISCOVERY_ERRORS:
                     pass
-                det = f"{lbtype.upper()} {name} — {dns} — ports: {','.join(map(str,ports)) if ports else 'unknown'}"
+                det = f"{lbtype.upper()} {name} вЂ” {dns} вЂ” ports: {','.join(map(str,ports)) if ports else 'unknown'}"
                 add_finding(findings, "EXPO-ELB", "Internet-facing ELBv2", f"Region={region}",
                             ["elbv2:DescribeLoadBalancers","elbv2:DescribeListeners"],
                             "BAD", det, "Consider internal scheme or place behind WAF/CloudFront; restrict upstreams.")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_elb_classic(sess, api_trace, region, findings):
@@ -194,11 +196,11 @@ def discover_elb_classic(sess, api_trace, region, findings):
                     for l in lb.get("ListenerDescriptions", [])
                     if (l.get("Listener") or {}).get("LoadBalancerPort") is not None
                 ]))
-                det = f"CLB {name} — {dns} — ports: {','.join(map(str,ports)) if ports else 'unknown'}"
+                det = f"CLB {name} вЂ” {dns} вЂ” ports: {','.join(map(str,ports)) if ports else 'unknown'}"
                 add_finding(findings, "EXPO-ELB", "Internet-facing Classic ELB", f"Region={region}",
                             ["elb:DescribeLoadBalancers"],
                             "BAD", det, "Consider internal scheme / ALB + WAF; restrict exposure.")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_apigw_v1(sess, api_trace, region, findings):
@@ -217,15 +219,15 @@ def discover_apigw_v1(sess, api_trace, region, findings):
                     sts = apigw.get_stages(restApiId=api["id"]).get("item", [])
                     if sts:
                         stage = sts[0].get("stageName")
-                except ClientError:
+                except AWS_DISCOVERY_ERRORS:
                     pass
                 if stage:
                     url = f"{url}/{stage}"
-                det = f"{api.get('name','(no-name)')} — {url} (types={','.join(types) or 'default'})"
+                det = f"{api.get('name','(no-name)')} вЂ” {url} (types={','.join(types) or 'default'})"
                 add_finding(findings, "EXPO-APIGW", "API Gateway (REST) public endpoint", f"Region={region}",
                             ["apigateway:GetRestApis","apigateway:GetStages"],
                             "BAD", det, "Use PRIVATE endpoints/VPC links or WAF; require AuthN/AuthZ.")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_apigw_v2(sess, api_trace, region, findings):
@@ -239,11 +241,11 @@ def discover_apigw_v2(sess, api_trace, region, findings):
                     api_id = api.get("ApiId")
                     proto = api.get("ProtocolType")
                     url = f"https://{api_id}.execute-api.{region}.amazonaws.com"
-                    det = f"{api.get('Name','(no-name)')} — {proto} — {url}"
+                    det = f"{api.get('Name','(no-name)')} вЂ” {proto} вЂ” {url}"
                     add_finding(findings, "EXPO-APIGW", "API Gateway v2 public endpoint", f"Region={region}",
                                 ["apigatewayv2:GetApis"], "BAD", det,
                                 "Disable default endpoint or protect with WAF/Auth; use private integration if possible.")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_s3(sess, api_trace, findings):
@@ -256,26 +258,26 @@ def discover_s3(sess, api_trace, findings):
             try:
                 st = s3.get_bucket_policy_status(Bucket=name)
                 is_public = bool(st.get("PolicyStatus", {}).get("IsPublic"))
-            except ClientError:
+            except AWS_DISCOVERY_ERRORS:
                 pass
             website = False
             try:
                 s3.get_bucket_website(Bucket=name)
                 website = True
-            except ClientError:
+            except AWS_DISCOVERY_ERRORS:
                 pass
             pab = {}
             try:
                 pab = s3.get_public_access_block(Bucket=name).get("PublicAccessBlockConfiguration", {})
-            except ClientError:
+            except AWS_DISCOVERY_ERRORS:
                 pass
 
             if is_public or website:
-                det = f"{name} — public={is_public} website={'enabled' if website else 'no'} PAB={pab or 'n/a'}"
+                det = f"{name} вЂ” public={is_public} website={'enabled' if website else 'no'} PAB={pab or 'n/a'}"
                 add_finding(findings, "EXPO-S3", "S3 bucket publicly reachable", "Global",
                             ["s3:ListBuckets","s3:GetBucketPolicyStatus","s3:GetBucketWebsite","s3:GetPublicAccessBlock"],
                             "BAD", det, "Block public access, remove public policies/ACLs, disable Website (or front with CloudFront+OAC).")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_rds(sess, api_trace, region, findings):
@@ -307,11 +309,11 @@ def discover_rds(sess, api_trace, region, findings):
                         break
                 if world:
                     host = (db.get("Endpoint") or {}).get("Address")
-                    det = f"{db.get('DBInstanceIdentifier')} — {host}:{port} — PubliclyAccessible=True & world-open SG"
+                    det = f"{db.get('DBInstanceIdentifier')} вЂ” {host}:{port} вЂ” PubliclyAccessible=True & world-open SG"
                     add_finding(findings, "EXPO-RDS", "RDS publicly reachable", f"Region={region}",
                                 ["rds:DescribeDBInstances","ec2:DescribeSecurityGroups"],
                                 "BAD", det, "Disable PubliclyAccessible or restrict SGs to allowlists/VPN; prefer private subnets.")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_opensearch(sess, api_trace, region, findings):
@@ -327,12 +329,12 @@ def discover_opensearch(sess, api_trace, region, findings):
             vpc = st.get("VPCOptions")
             if not vpc:  # public
                 ep = st.get("Endpoint") or (st.get("Endpoints") or {}).get("vpc")
-                det = f"{name} — endpoint={ep or 'unknown'}"
+                det = f"{name} вЂ” endpoint={ep or 'unknown'}"
                 add_finding(findings, "EXPO-OS", "OpenSearch public endpoint", f"Region={region}",
                             ["opensearch:ListDomainNames","opensearch:DescribeDomain"],
                             "BAD", det, "Place domain inside VPC and restrict access (SG/ACL/WAF).")
         return
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
     # Legacy Elasticsearch (es)
     try:
@@ -346,11 +348,11 @@ def discover_opensearch(sess, api_trace, region, findings):
             vpc = st.get("VPCOptions")
             if not vpc:
                 ep = st.get("Endpoint")
-                det = f"{name} — endpoint={ep or 'unknown'}"
+                det = f"{name} вЂ” endpoint={ep or 'unknown'}"
                 add_finding(findings, "EXPO-OS", "Elasticsearch public endpoint", f"Region={region}",
                             ["es:ListDomainNames","es:DescribeElasticsearchDomain"],
                             "BAD", det, "Place domain inside VPC and restrict access (SG/ACL/WAF).")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_redshift(sess, api_trace, region, findings):
@@ -361,11 +363,11 @@ def discover_redshift(sess, api_trace, region, findings):
             for c in page.get("Clusters", []):
                 if c.get("PubliclyAccessible"):
                     ep = (c.get("Endpoint") or {}).get("Address")
-                    det = f"{c.get('ClusterIdentifier')} — {ep}"
+                    det = f"{c.get('ClusterIdentifier')} вЂ” {ep}"
                     add_finding(findings, "EXPO-RED", "Redshift publicly reachable", f"Region={region}",
                                 ["redshift:DescribeClusters"], "BAD", det,
                                 "Disable PubliclyAccessible and restrict SG; prefer private subnets.")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_eks(sess, api_trace, region, findings):
@@ -378,11 +380,11 @@ def discover_eks(sess, api_trace, region, findings):
                 vcfg = d.get("resourcesVpcConfig") or {}
                 public = bool(vcfg.get("endpointPublicAccess"))
                 if public:
-                    det = f"{n} — endpoint={d.get('endpoint')}"
+                    det = f"{n} вЂ” endpoint={d.get('endpoint')}"
                     add_finding(findings, "EXPO-EKS", "EKS public API endpoint", f"Region={region}",
                                 ["eks:ListClusters","eks:DescribeCluster"],
                                 "BAD", det, "Disable public access or restrict CIDRs; use private endpoint/VPN/bastion.")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_apprunner(sess, api_trace, region, findings):
@@ -402,19 +404,19 @@ def discover_apprunner(sess, api_trace, region, findings):
                 arn = s.get("ServiceArn")
                 try:
                     d = ar.describe_service(ServiceArn=arn).get("Service", {})
-                except ClientError:
+                except AWS_DISCOVERY_ERRORS:
                     continue
                 ingress = (d.get("IngressConfiguration") or {}).get("IsPubliclyAccessible")
                 if ingress:
                     url = d.get("ServiceUrl")
-                    det = f"{d.get('ServiceName')} — {url}"
+                    det = f"{d.get('ServiceName')} вЂ” {url}"
                     add_finding(findings, "EXPO-APP", "App Runner public service", f"Region={region}",
                                 ["apprunner:ListServices","apprunner:DescribeService"],
                                 "BAD", det, "Make ingress private or protect with Auth/WAF.")
             next_token = resp.get("NextToken")
             if not next_token:
                 break
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_cloudfront(sess, api_trace, findings):
@@ -427,11 +429,11 @@ def discover_cloudfront(sess, api_trace, findings):
                 if d.get("Enabled"):
                     dom = d.get("DomainName")
                     id_ = d.get("Id")
-                    det = f"{id_} — {dom}"
+                    det = f"{id_} вЂ” {dom}"
                     add_finding(findings, "EXPO-CF", "CloudFront distribution (public edge)", "Global",
                                 ["cloudfront:ListDistributions"], "BAD", det,
                                 "Ensure auth/WAF/OAC as needed; limit origins' public exposure.")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_global_accelerator(sess, api_trace, findings):
@@ -441,11 +443,11 @@ def discover_global_accelerator(sess, api_trace, findings):
         for page in paginator.paginate():
             for a in page.get("Accelerators", []):
                 if a.get("Enabled"):
-                    det = f"{a.get('Name')} — {a.get('DnsName')}"
+                    det = f"{a.get('Name')} вЂ” {a.get('DnsName')}"
                     add_finding(findings, "EXPO-GA", "Global Accelerator (public entry)", "Global",
                                 ["globalaccelerator:ListAccelerators"], "BAD", det,
                                 "Ensure front-door protections (WAF) and restrict backends.")
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 def discover_msk(sess, api_trace, region, findings):
@@ -459,13 +461,13 @@ def discover_msk(sess, api_trace, region, findings):
                 try:
                     bb = msk.get_bootstrap_brokers(ClusterArn=arn)
                     if any(k.startswith("Public") for k in bb.keys()):
-                        det = f"{c.get('ClusterName')} — has public bootstrap brokers"
+                        det = f"{c.get('ClusterName')} вЂ” has public bootstrap brokers"
                         add_finding(findings, "EXPO-MSK", "MSK public bootstrap brokers", f"Region={region}",
                                     ["kafka:ListClusters","kafka:GetBootstrapBrokers"],
                                     "BAD", det, "Disable public access; use private connectivity.")
-                except ClientError:
+                except AWS_DISCOVERY_ERRORS:
                     pass
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
     # MSK v2
     try:
@@ -477,13 +479,13 @@ def discover_msk(sess, api_trace, region, findings):
                 try:
                     bb = msk.get_bootstrap_brokers(ClusterArn=arn)
                     if any(k.startswith("Public") for k in bb.keys()):
-                        det = f"{c.get('ClusterName')} — has public bootstrap brokers"
+                        det = f"{c.get('ClusterName')} вЂ” has public bootstrap brokers"
                         add_finding(findings, "EXPO-MSK", "MSK (v2) public bootstrap brokers", f"Region={region}",
                                     ["kafka:ListClustersV2","kafka:GetBootstrapBrokers"],
                                     "BAD", det, "Disable public access; use private connectivity.")
-                except ClientError:
+                except AWS_DISCOVERY_ERRORS:
                     pass
-    except (ClientError, EndpointConnectionError):
+    except AWS_DISCOVERY_ERRORS:
         pass
 
 # ---------------- main analyze ----------------
@@ -518,7 +520,7 @@ def analyze(args):
         discover_opensearch(sess, api_trace, r, findings)
         discover_redshift(sess, api_trace, r, findings)
         discover_eks(sess, api_trace, r, findings)
-        discover_apprunner(sess, api_trace, r, findings)   # ← FIXED: manual pagination
+        discover_apprunner(sess, api_trace, r, findings)   # в†ђ FIXED: manual pagination
         discover_msk(sess, api_trace, r, findings)
 
     if not findings:

@@ -22,11 +22,11 @@ Metasploit-style **AWS security auditor**: enumerate, test, and report on S3, EC
 ## ✨ Features
 
 - **REPL console** with Metasploit-inspired UX (`use`, `set`, `setg`, `run`, `runall`, `show modules`, `exit`).
-- **Modules**: `s3`, `ec2`, `iam`, `lambda`, `report` (Excel builder).
+- **Modules**: `s3`, `ec2`, `iam`, `lambda`, `exposure`, `report` (Excel builder).
 - **All-regions scanning** or single region targeting.
 - **Per-resource JSON** artifacts (under `RawData/`), including **CLI request/response** trace.
 - **Excel report** (`Reports/LazyAWS_Report.xlsx`) with **severity** (Critical/High/Medium/Low) mapping per finding.
-- **Knowledge base** for tests & severities in code (`checks/report_severity.py`) + rich “What was tested” descriptions.
+- **Severity policy** for report findings in code (`checks/report_severity.py`).
 - **Idempotent artifacts**: keeps latest result per resource (where implemented) to avoid file explosion on repeated runs.
 
 ---
@@ -100,9 +100,11 @@ lazyaws/
     check_ec2.py              # EC2 checks
     check_iam.py              # IAM checks
     check_lambda.py           # Lambda checks
+    check_exposure.py         # Internet exposure inventory
     check_report.py           # Excel report builder
     report_severity.py        # severity policy + normalization
     __init__.py
+  kb/                         # optional check knowledge-base references
   RawData/                    # JSON artifacts (inputs to report)
   Reports/                    # Generated Excel
 ```
@@ -131,9 +133,9 @@ pip install -r requirements.txt
 ## 🧪 How it works
 
 - Each module gathers metadata via `boto3` and writes a **normalized JSON** file into `RawData/`:
-  - `Meta`: `Service`, `Target` (resource), `Region`, `Profile`, `TimeUTC`
-  - `Findings`: list of checks with `Check`, `Status`/`StatusPlain`, `Details`, `Recommendation`
-  - `Aux.api_trace`: ordered list of API calls with **CLI request/response** strings (or synthesized from params)
+  - `Meta` / `meta`: `Service`, `Target` (resource), `Region`, `Profile`, `TimeUTC`
+  - `Findings` / `findings`: list of checks with `Check`, `Status`/`StatusPlain`, `Details`, `Recommendation`
+  - `Aux.api_trace` / `api_trace`: ordered list of API calls with **CLI request/response** strings (or synthesized from params)
 - The `report` module reads all `RawData/*.json`, normalizes status and severity, and builds per-service sheets:
   - Columns: **Resource | Region | Profile | Time (UTC) | Check | Status | Details | Recommendation | CLI request(s) | CLI response(s)**
   - Only **failed** (`WARN`/`BAD`) findings are listed by default (OK/N/A are suppressed).
@@ -173,6 +175,11 @@ pip install -r requirements.txt
 - Role wildcards/Admin, X-Ray, KMS for env
 - VPC/SG posture, DLQ, runtime EOL, code signing
 - CORS, outdated layers, EFS hardening, tagging
+
+### Exposure
+- Internet-facing EC2, ELB/ALB/NLB, API Gateway, S3 website/public buckets
+- Public RDS, OpenSearch/Elasticsearch, Redshift, EKS API endpoints
+- Public App Runner, CloudFront, Global Accelerator, and MSK bootstrap brokers
 
 ---
 

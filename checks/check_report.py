@@ -66,10 +66,17 @@ def get_findings(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
                     return v2
     return []
 
+def get_meta(doc: Dict[str, Any]) -> Dict[str, Any]:
+    for key in ("meta", "Meta"):
+        v = doc.get(key)
+        if isinstance(v, dict):
+            return v
+    return {}
+
 def group_by_service(items: List[Tuple[str, Dict[str, Any]]]) -> Dict[str, List[Tuple[str, Dict[str, Any]]]]:
     groups: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
     for path, data in items:
-        svc = (data.get("Meta", {}) or {}).get("Service") or infer_service_from_filename(path)
+        svc = get_meta(data).get("Service") or infer_service_from_filename(path)
         groups.setdefault(str(svc), []).append((path, data))
     return groups
 
@@ -100,19 +107,21 @@ def extract_api_list_from_check(check_text: str) -> List[str]:
         t = re.sub(r"\s+", "", t)
         if ":" in t:
             svc, op = t.split(":", 1)
+            op = re.sub(r"\(.*?\)", "", op)
             norm.append(f"{svc.lower()}:{op}")
         else:
+            t = re.sub(r"\(.*?\)", "", t)
             norm.append(t.lower())
     return norm
 
 def api_trace_from_json(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
-    aux = doc.get("Aux", {}) or {}
-    # canonical
-    if isinstance(aux.get("api_trace"), list):
-        return aux["api_trace"]  # type: ignore
-    # legacy
-    if isinstance(aux.get("CliTrace"), list):
-        return aux["CliTrace"]  # type: ignore
+    for key in ("api_trace", "ApiTrace", "CliTrace"):
+        if isinstance(doc.get(key), list):
+            return doc[key]  # type: ignore
+    aux = doc.get("aux", {}) or doc.get("Aux", {}) or {}
+    for key in ("api_trace", "ApiTrace", "CliTrace"):
+        if isinstance(aux.get(key), list):
+            return aux[key]  # type: ignore
     return []
 
 def to_kebab(op_name: str) -> str:
@@ -126,6 +135,11 @@ def render_cli_from_trace_item(item: Dict[str, Any]) -> Tuple[str, str]:
     Also support 'request_str'/'response_str' overrides.
     Else synthesize from service/operation/request.
     """
+    if item.get("cli_request") or item.get("cli_response"):
+        return (
+            strip_ansi(str(item.get("cli_request", "")).strip()),
+            strip_ansi(str(item.get("cli_response", "")).strip()),
+        )
     # explicit text fields first
     if item.get("request_str") or item.get("response_str"):
         return (
@@ -189,7 +203,10 @@ def style_sheet(ws):
     for cell in ws[1]:
         cell.font = hdr_font
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    widths = {1:45, 2:12, 3:60, 4:50, 5:60, 6:60}
+    widths = {
+        1: 32, 2: 16, 3: 16, 4: 24, 5: 45, 6: 12,
+        7: 60, 8: 50, 9: 60, 10: 60,
+    }
     for col, w in widths.items():
         ws.column_dimensions[get_column_letter(col)].width = w
 
@@ -203,11 +220,15 @@ def apply_severity_fill(cell, severity: str):
 
 def build_sheet(wb: Workbook, title: str, docs: List[Tuple[str, Dict[str, Any]]]) -> int:
     ws = wb.create_sheet(title)
-    ws.append(["Check", "Status", "Details", "Recommendation", "CLI request(s)", "CLI response(s)"])
+    ws.append([
+        "Resource", "Region", "Profile", "Time (UTC)", "Check", "Status",
+        "Details", "Recommendation", "CLI request(s)", "CLI response(s)",
+    ])
     style_sheet(ws)
     rows_written = 0
 
     for _, doc in docs:
+        meta = get_meta(doc)
         findings = get_findings(doc)
         trace = api_trace_from_json(doc)
         if not isinstance(findings, list):
@@ -230,6 +251,10 @@ def build_sheet(wb: Workbook, title: str, docs: List[Tuple[str, Dict[str, Any]]]
                 if r_out: ress.append(r_out)
 
             ws.append([
+                meta.get("Target", ""),
+                meta.get("Region", ""),
+                meta.get("Profile", ""),
+                meta.get("TimeUTC", ""),
                 check_text,
                 severity,
                 strip_ansi(f.get("Details", "") or f.get("details","")),
@@ -237,15 +262,27 @@ def build_sheet(wb: Workbook, title: str, docs: List[Tuple[str, Dict[str, Any]]]
                 join_multiline(reqs, 8),
                 join_multiline(ress, 8),
             ])
-            apply_severity_fill(ws.cell(row=ws.max_row, column=2), severity)
-            for c in range(1, 7):
+            apply_severity_fill(ws.cell(row=ws.max_row, column=6), severity)
+            for c in range(1, 11):
                 ws.cell(row=ws.max_row, column=c).alignment = Alignment(wrap_text=True, vertical="top")
             rows_written += 1
 
     if rows_written == 0:
-        ws.append(["(no failed findings in source data)", "OK", "", "", "", ""])
-        apply_severity_fill(ws.cell(row=ws.max_row, column=2), "OK")
+        ws.append(["(no failed findings in source data)", "", "", "", "", "OK", "", "", "", ""])
+        apply_severity_fill(ws.cell(row=ws.max_row, column=6), "OK")
     return rows_written
+
+def build_summary_sheet(wb: Workbook, message: str):
+    ws = wb.create_sheet("Summary")
+    ws.append(["Status", "Details"])
+    ws.append(["OK", message])
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 80
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    apply_severity_fill(ws.cell(row=2, column=1), "OK")
+    ws.cell(row=2, column=2).alignment = Alignment(wrap_text=True, vertical="top")
 
 # -------------------- main/report --------------------
 
@@ -261,19 +298,26 @@ def analyze(args):
     order = ["S3","IAM","Lambda","EC2","Exposure","Unknown"]
     counts = {}
 
-    for svc in order:
-        docs = groups.get(svc, [])
-        if not docs: 
-            continue
-        rows = build_sheet(wb, svc, docs)
-        counts[svc] = {"files": len(docs), "rows": rows}
-    # any other services not in order
-    for svc, docs in groups.items():
-        if svc in order or not docs:
-            continue
-        rows = build_sheet(wb, svc, docs)
-        counts[svc] = {"files": len(docs), "rows": rows}
+    if not items:
+        build_summary_sheet(wb, "No RawData JSON artifacts found. Run one or more checks before building a findings report.")
+    else:
+        for svc in order:
+            docs = groups.get(svc, [])
+            if not docs:
+                continue
+            rows = build_sheet(wb, svc, docs)
+            counts[svc] = {"files": len(docs), "rows": rows}
+        # any other services not in order
+        for svc, docs in groups.items():
+            if svc in order or not docs:
+                continue
+            rows = build_sheet(wb, svc, docs)
+            counts[svc] = {"files": len(docs), "rows": rows}
 
+        if not wb.sheetnames:
+            build_summary_sheet(wb, "RawData files were present, but no readable LazyAWS findings were found.")
+
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
     for svc, st in counts.items():
         print(f"[{svc}] files={st['files']} rows={st['rows']}")

@@ -281,6 +281,10 @@ def run_check(fn, args):
             failed.append(ff)
 
     record = {
+        "Meta": meta,
+        "Findings": findings,
+        "FailedFindings": failed,
+        "Aux": {"api_trace": api_trace},
         "meta": meta,
         "findings": findings,
         "failed_findings": failed,

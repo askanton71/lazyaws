@@ -209,12 +209,34 @@ class Shell:
         print(f"[+] Set global {key} = {val}")
 
     # ---------- helpers ----------
-    def _build_namespace_for_module(self, mod: str, inline_args: dict[str, str]):
+    def _module_defaults(self, mod) -> dict:
+        """
+        Read defaults from a module's add_arguments() without enforcing required args.
+        """
+        defaults = {}
+        if not hasattr(mod, "add_arguments"):
+            return defaults
+        parser = argparse.ArgumentParser(add_help=False)
+        try:
+            mod.add_arguments(parser)
+        except Exception:
+            return defaults
+        for action in parser._actions:
+            if not getattr(action, "dest", None) or action.dest == argparse.SUPPRESS:
+                continue
+            if action.default is not argparse.SUPPRESS:
+                defaults[action.dest] = action.default
+        return defaults
+
+    def _build_namespace_for_module(self, mod, inline_args: dict[str, str]):
         """
         Compose argparse.Namespace expected by the module's analyze(...)
         Priority: inline args > module opts > globals
         """
-        opts = dict(self.module_opts.get(mod, {}))
+        mod_name = self.current_module or ""
+        opts = self._module_defaults(mod)
+        opts.update({k: v for k, v in self.globals.items() if v is not None})
+        opts.update(dict(self.module_opts.get(mod_name, {})))
         opts.update(inline_args)
         profile = opts.get("profile", self.globals.get("profile"))
         region = opts.get("region", self.globals.get("region"))
@@ -239,7 +261,7 @@ class Shell:
         modpath = MODULES[self.current_module]
         mod = importlib.import_module(modpath)
         inline = self._parse_kv(args)
-        ns = self._build_namespace_for_module(self.current_module, inline)
+        ns = self._build_namespace_for_module(mod, inline)
         try:
             if hasattr(mod, "analyze"):
                 run_check(mod.analyze, ns)
@@ -331,10 +353,11 @@ class Shell:
         for r in regions:
             try:
                 ec2 = sess.client("ec2", region_name=r)
-                page = ec2.describe_instances()
-                for res in page.get("Reservations", []):
-                    for inst in res.get("Instances", []):
-                        discovered.append((r, inst.get("InstanceId")))
+                pager = ec2.get_paginator("describe_instances")
+                for page in pager.paginate():
+                    for res in page.get("Reservations", []):
+                        for inst in res.get("Instances", []):
+                            discovered.append((r, inst.get("InstanceId")))
             except Exception as e:
                 print(f"[i] Skip region {r}: {e}")
         print(f"Found {len(discovered)} instances across {len(regions)} region(s). Running EC2 checks...\n")

@@ -257,11 +257,20 @@ def analyze(args):
     # EC2-006 Public subnet (IGW route)
     if subnet_id:
         try:
-            rts = ec2.describe_route_tables(Filters=[{"Name":"association.subnet-id","Values":[subnet_id]}])
+            rts_resp = ec2.describe_route_tables(Filters=[{"Name":"association.subnet-id","Values":[subnet_id]}])
+            route_tables = rts_resp.get("RouteTables", [])
+            if not route_tables and vpc_id:
+                main_resp = ec2.describe_route_tables(Filters=[
+                    {"Name":"vpc-id","Values":[vpc_id]},
+                    {"Name":"association.main","Values":["true"]},
+                ])
+                route_tables = main_resp.get("RouteTables", [])
             has_igw = False
-            for rt in rts.get("RouteTables", []):
+            for rt in route_tables:
                 for r in rt.get("Routes", []) or []:
-                    if r.get("DestinationCidrBlock") == "0.0.0.0/0" and str(r.get("GatewayId","")).startswith("igw-"):
+                    ipv4_public = r.get("DestinationCidrBlock") == "0.0.0.0/0"
+                    ipv6_public = r.get("DestinationIpv6CidrBlock") == "::/0"
+                    if (ipv4_public or ipv6_public) and str(r.get("GatewayId","")).startswith("igw-"):
                         has_igw = True; break
                 if has_igw: break
             add_finding(findings, "EC2-006", "Instance in public subnet (IGW route)", "Subnet/RouteTable", ["ec2:DescribeRouteTables"],

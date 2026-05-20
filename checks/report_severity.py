@@ -99,50 +99,54 @@ BASE_SEVERITY: Dict[str, str] = {
     "EC2-061": "Low",     # Shutdown behavior misaligned
     "EC2-070": "Medium",  # SSH key pair present (prefer SSM)
 
-    # IAM (cover 001..020 incl. gaps 010+)
+    # IAM (codes emitted by checks/check_iam.py)
     "IAM-001": "Critical", # Root MFA disabled
-    "IAM-002": "High",     # Root access keys present
-    "IAM-003": "High",     # Admin* policies attached broadly
-    "IAM-004": "High",     # Wildcards in Action/Resource
-    "IAM-010": "Medium",   # Weak password policy
-    "IAM-011": "Medium",   # Access keys age > 90 days
-    "IAM-012": "Medium",   # Inactive users / no recent activity
-    "IAM-013": "High",     # Unscoped iam:PassRole
-    "IAM-014": "High",     # AssumeRole trust without restrictive Condition
-    "IAM-015": "High",     # Console users without MFA
-    "IAM-016": "Medium",   # Access Analyzer external trust findings present
-    "IAM-017": "Medium",   # Inline policies on users (governance)
-    "IAM-018": "Medium",   # Access key rotation disabled/org policy gaps
-    "IAM-019": "Medium",   # Password reuse/expiration policy weak
-    "IAM-020": "Low",      # Informational posture
+    "IAM-002": "Medium",   # Weak password policy
+    "IAM-003": "High",     # Users without MFA
+    "IAM-004": "Medium",   # Access keys older than threshold
+    "IAM-010": "High",     # AdministratorAccess attached
+    "IAM-011": "High",     # Wildcards in Action/Resource
+    "IAM-012": "High",     # Unscoped iam:PassRole
+    "IAM-013": "Medium",   # Unused credentials
+    "IAM-014": "Critical", # Root access keys present
+    "IAM-999": "Low",      # Unable to list users
 
-    # Lambda (cover 001..020)
+    # Lambda (codes emitted by checks/check_lambda.py)
     "LAMBDA-001": "High",   # Public Function URL without auth
-    "LAMBDA-002": "High",   # Plaintext secrets in env (heuristic)
-    "LAMBDA-003": "Medium", # No reserved concurrency (DoS blast radius)
-    "LAMBDA-004": "High",   # Execution role wildcards/Admin
-    "LAMBDA-005": "Low",    # X-Ray tracing disabled
-    "LAMBDA-006": "Medium", # No KMS key for env encryption
-    "LAMBDA-007": "High",   # In public subnets / SG wide-open (egress/ingress)
-    "LAMBDA-008": "Medium", # No DLQ (SNS/SQS) for async invocations
-    "LAMBDA-009": "Low",    # Timeout/memory too high (cost/stability)
-    "LAMBDA-010": "High",   # Runtime EOL/outdated
-    "LAMBDA-011": "Medium", # Code signing not enforced
-    "LAMBDA-012": "Medium", # Function URL CORS overly permissive
-    "LAMBDA-013": "Medium", # Outdated/vulnerable layer(s)
-    "LAMBDA-014": "Low",    # No VPC where required (data egress control)
-    "LAMBDA-015": "Medium", # EFS access without IAM/KMS controls
-    "LAMBDA-016": "Low",    # No description/tags/owner metadata
-    "LAMBDA-017": "Medium", # Permissions allow cross-account invoke
-    "LAMBDA-018": "Medium", # Unpinned dependency versions (SBOM/IA)
-    "LAMBDA-019": "Low",    # No alarms/metrics for errors/throttles
-    "LAMBDA-020": "Low",    # Informational posture
+    "LAMBDA-002": "High",   # Resource policy wildcard principal
+    "LAMBDA-003": "Medium", # No DLQ
+    "LAMBDA-004": "Medium", # Async event invoke config missing
+    "LAMBDA-005": "High",   # Plaintext secrets in env (heuristic)
+    "LAMBDA-006": "Low",    # X-Ray tracing disabled
+    "LAMBDA-007": "Low",    # VPC not configured where desired
+    "LAMBDA-010": "High",   # Execution role Admin/wildcards/PassRole
+    "LAMBDA-011": "Medium", # No reserved concurrency
+    "LAMBDA-012": "High",   # Runtime EOL/outdated
+    "LAMBDA-013": "Low",    # Log retention not configured
+    "LAMBDA-014": "Medium", # Code signing not enforced
+    "LAMBDA-015": "Medium", # Public layer policy
+    "LAMBDA-999": "High",   # Unable to read function config
+
+    # Exposure inventory
+    "EXPO-000": "OK",
+    "EXPO-EC2": "High",
+    "EXPO-ELB": "High",
+    "EXPO-APIGW": "High",
+    "EXPO-S3": "High",
+    "EXPO-RDS": "Critical",
+    "EXPO-OS": "High",
+    "EXPO-RED": "High",
+    "EXPO-EKS": "High",
+    "EXPO-APP": "High",
+    "EXPO-CF": "Medium",
+    "EXPO-GA": "High",
+    "EXPO-MSK": "Critical",
 }
 
 def infer_check_code(check_text: str) -> str:
     if not check_text:
         return "GEN-000"
-    m = re.match(r'^\s*([A-Z]{2,12}-\d{3})\b', str(check_text).strip())
+    m = re.match(r'^\s*([A-Z]{2,12}-[A-Z0-9]{2,6})\b', str(check_text).strip())
     return m.group(1) if m else "GEN-000"
 
 def severity_for(code: str, finding: dict) -> str:
@@ -178,13 +182,13 @@ def severity_for(code: str, finding: dict) -> str:
     if code == "S3-011" and ("billing" in details or "exports" in details or "pii" in details):
         sev = "High"
 
-    if code == "IAM-010":
+    if code == "IAM-002":
         if "minlength<" in details or "no mfa" in details or "password expiration: disabled" in details:
             sev = "High"
 
-    if code == "LAMBDA-001" and ("no auth" in details or "public url" in details):
+    if code == "LAMBDA-001" and ("no auth" in details or "authtype=none" in details or "public url" in details):
         sev = "High"
-    if code == "LAMBDA-002" and ("secret" in details or "password" in details):
+    if code == "LAMBDA-005" and ("secret" in details or "password" in details):
         sev = "High"
 
     return sev
